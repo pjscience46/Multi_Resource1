@@ -1,0 +1,156 @@
+
+import time
+import pandas as pd
+from task import *
+from random import *
+import csv
+import codecs
+from numerics import *
+from processors import *
+from statistics import *
+import matplotlib.pyplot as plt
+from logging import log
+from model import *
+
+MODEL_LIST = [RooflineModel(),AmdahlModel(),AmdahlModel(),CommunicationModel()]
+
+#MODEL_LIST = [Roofline()]
+def generate_task(w_bounds, p_bounds, d_prime_bounds, c_prime_bounds):
+    """Generate a task based on the boundaries written in numerics"""
+    w = uniform(w_bounds[0], w_bounds[1])
+    p = randint(p_bounds[0], p_bounds[1])
+    d_prime = uniform(dprime_bounds[0], dprime_bounds[1])
+    c_prime = uniform(cprime_bounds[0], cprime_bounds[1])
+    return Task(w, p, d_prime, c_prime)
+
+
+def generate_n_tasks(n, w_bounds, p_bounds, d_prime_bounds, c_prime_bounds):
+    """Generate a list of n tasks based on the boundaries written in numerics"""
+    output = []
+    for i in range(n):
+        output += [generate_task(w_bounds, p_bounds, d_prime_bounds, c_prime_bounds)]
+    return output
+
+
+def extract_dependencies_from_csv(file, utf_code="utf-8"):
+    """
+    This function extract dependencies from a DAGGEN Output under a csv format.
+
+    For some files you may need to change "utf-16" by "utf-8" depending on the method you used to create the csv files
+    from the DAGGEN algorithm.
+
+    """
+    edges = []
+    f = codecs.open(file, "rb", utf_code)
+    reader = csv.reader(f)
+    for row in reader:
+        if len(row) == 1 and row[0][0] != '/' and row[0][0] != 'd' and row[0][0] != '}':
+            element = row[0][2:]
+            i = 0
+            while element[i] != ' ':
+                i += 1
+            first_node = int(element[0:i]) - 1
+            while element[i] == "-" or element[i] == ">" or element[i] == " ":
+                i += 1
+            j = i
+            while element[j] != ' ':
+                j += 1
+            second_node = int(element[i:j]) - 1
+            edge = [first_node, second_node]
+            edges += [edge]
+    f.close()
+    return edges
+
+
+def generate_nodes_edges(n, w_bounds, p_bounds, d_prime_bounds, c_prime_bounds, dependency_file):
+    nodes = generate_n_tasks(n, w_bounds, p_bounds, d_prime_bounds, c_prime_bounds)
+    edges = extract_dependencies_from_csv(dependency_file)
+    for edge in edges:  # We need to pass from numbers to task objects
+        edge[0] = nodes[edge[0]]
+        edge[1] = nodes[edge[1]]
+    return [nodes, edges]
+
+
+def save_nodes_in_csv(n, w_bounds, p_bounds, d_prime_bounds, c_prime_bounds, file):
+    """Saves a set of nodes and their parameters in a csv file"""
+    nodes = generate_n_tasks(n, w_bounds, p_bounds, d_prime_bounds, c_prime_bounds)
+    f = open(file, 'w', newline='')
+    writer = csv.writer(f)
+    writer.writerow(['w', 'p', 'd', 'c'])
+    for task in nodes:
+        w = task.get_w()
+        p = task.get_p()
+        d = task.get_d()
+        c = task.get_c()
+        writer.writerow([str(w), str(p), str(d), str(c)])
+    f.close()
+
+
+def load_nodes_from_csv(file):
+    """Loads a set of nodes from a csv file"""
+    f = open(file, 'r', newline='')
+    reader = csv.reader(f)
+    nodes = []
+    for row in reader:
+        if row[0] != 'w':
+            w = float(row[0])
+            p_tild = float(row[1])
+            d = float(row[2])
+            c = float(row[3])
+            nodes += [Task(w, p_tild, d, c)]
+    return nodes
+
+
+def compute_and_save( result_directory,model_name,mu,alpha,beta,gamma,version,writer,priority_num):
+  
+    model = {}
+    if(model_name == 'General'):
+        model = GeneralModel()
+    elif(model_name == 'Roofline'):
+        model = RooflineModel()
+    elif(model_name == 'Amdahl'):
+        model = AmdahlModel()
+    elif(model_name == 'Communication'):
+        model = CommunicationModel()
+
+    # Load combinations.csv into a DataFrame
+    combinations_df = pd.read_csv('combinations.csv')
+    # Loop through each row in the DataFrame
+    row_number = 0
+    max_makespan_ratio = float("-inf")
+    for index, row in combinations_df.iterrows():     
+        P = int(row['P'])
+        n = int(row['n'])
+        i = int(row['Index'])
+        daggen_file = "GRAPHS/" + 'n'+ "=" +str(n) + "/" + "daggen_output_"+ str(i) + ".csv"
+        node_file = "Tasks/n=" + str(n) + "/" + str(i) + ".csv"
+        nodes = load_nodes_from_csv(node_file) #w,p,c,d list
+        edges = extract_dependencies_from_csv(daggen_file)
+        task_graph = Graph(nodes, edges) #generate task graphs       
+        adjacency = task_graph.get_adjacency()
+        #opt time is max (Amin/p , cmin)
+        time_opt = task_graph.get_T_opt(P, adjacency, speedup_model=model)
+        # three Algorithms
+        processors = Processors(P)
+        time_algo_1 = processors.online_scheduling_algorithm(task_graph, 1, alpha=alpha,beta=beta,gamma=gamma,
+                                                                adjacency=adjacency, mu=mu
+                                                                , speedup_model=model, P=P
+                                                                ,version=version,priority_num=priority_num)
+        # Minimum time algorithm
+        min_time = processors.online_scheduling_algorithm(task_graph, 2, alpha=alpha,beta=beta,gamma=gamma,
+                                                                adjacency=adjacency, mu=mu
+                                                                , speedup_model=model, P=P
+                                                                ,version=version,priority_num=priority_num)
+        makespan_ratio = (time_algo_1/time_opt)
+        writer.writerow([str(P),str(n), str(time_algo_1), str(time_opt),str(makespan_ratio)])
+        if makespan_ratio > max_makespan_ratio:
+            max_makespan_ratio = makespan_ratio
+        row_number = row_number+1
+        if alpha is not None:
+            print (f"Completed computation for {row_number} (mu,alpha):{mu,alpha} model:{model_name} P:{P} n:{n} ")
+        elif beta is not None:
+            print (f"Completed computation for {row_number} (mu,beta):{mu,beta} model:{model_name} P:{P} n:{n} ")
+        elif gamma is not None:
+            print (f"Completed computation for {row_number} (mu,gamma):{mu,gamma} model:{model_name} P:{P} n:{n} ")
+    print(max_makespan_ratio)
+    return max_makespan_ratio
