@@ -146,6 +146,11 @@ class Task:
                         Beta_min = AR
                         final_nb_processors = i 
 
+            if final_nb_processors > ceil(mu * P_num):
+                self.set_allocation(ceil(mu * P_num))
+            else:
+                self.set_allocation(final_nb_processors) 
+
         elif version == 1:
             Alpha_min = inf
             for i in range(1, p_max + 1):
@@ -154,7 +159,12 @@ class Task:
                 if AR >=1 and AR <= alpha:
                     if TR < Alpha_min:
                         Alpha_min = TR
-                        final_nb_processors = i  
+                        final_nb_processors = i 
+
+            if final_nb_processors > ceil(mu * P_num):
+                self.set_allocation(ceil(mu * P_num))
+            else:
+                self.set_allocation(final_nb_processors)  
 
         elif version == 2:
             min_value = float('inf')
@@ -164,13 +174,26 @@ class Task:
                 total_value = ((AR )* gamma ) + ((TR )* (1 - gamma))
                 if total_value < min_value:
                     min_value = total_value
-                    final_nb_processors = i  
+                    final_nb_processors = i 
 
-                                
-        if final_nb_processors > ceil(mu * P_num):
-            self.set_allocation(ceil(mu * P_num))
-        else:
+            if final_nb_processors > ceil(mu * P_num):
+                self.set_allocation(ceil(mu * P_num))
+            else:
+                self.set_allocation(final_nb_processors) 
+
+        elif version == 3:
+            R_min = inf   
+            final_nb_processors = 1
+            for i in range(1, p_max + 1):
+                AR = self.get_area(i, speedup_model) / a_min[0]
+                TR = self.get_execution_time(i, speedup_model) / t_min[0]
+                R_j = max(TR, AR)
+
+                if R_j < R_min:
+                    R_min = R_j
+                    final_nb_processors = i    #not storing global r as we are not using it to calculate adjusted allocation
             self.set_allocation(final_nb_processors)
+
             
 
     def get_minimum_execution_time(self, P, speedup_model: Model):
