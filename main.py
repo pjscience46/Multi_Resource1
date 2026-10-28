@@ -23,14 +23,9 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import itertools
-import os
 import csv
-import sys
-import itertools
 from typing import Optional, Tuple, Dict, Any, List
 import random as pyrandom
-from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict, Any
 
 
 priority_num = int(input("Enter the Priority Number [0-FCFS, 1-Allocation, 2-Length, 3-Area]: "))
@@ -46,73 +41,52 @@ elif priority_num == 3:
 else:
     raise ValueError("Invalid priority number")
 
-version = int(input("Enter algorithm version number[0-MAST, 1-MTSA, 2-MTPA] : "))
+version = int(input("Enter algorithm version number [0-MAST, 1-MTSA, 2-MTPA, 3-FAIR]: "))
 if version == 0:
     parameter = 'beta'
-    folder = f"{priority_name}/BO_MAST/Results_mast/"     #change
+    folder = f"multiresource/{priority_name}/BO_MAST/Results_mast/"     #change
     sub_folder = "BO_MAST" #change
 elif version == 1:
     parameter = 'alpha'
-    folder = f"{priority_name}/BO_MTSA/Results_mtsa/"
+    folder = f"multiresource/{priority_name}/BO_MTSA/Results_mtsa/"
     sub_folder = "BO_MTSA"
 elif version == 2:
     parameter = 'gamma'
-    folder = f"{priority_name}/BO_MTPA/Results_mtpa/"
+    folder = f"multiresource/{priority_name}/BO_MTPA/Results_mtpa/"
     sub_folder = "BO_MTPA"
+elif version == 3:
+    parameter = 'mu'
+    folder = f"multiresource/{priority_name}/FAIR/Results_fair/"
+    sub_folder = "FAIR"
+else:
+    raise ValueError("Invalid algorithm version")
 
-model_num = int(input("Enter the Model Number [0-Roofline , 1-Amdahl, 2-Communication , 3-General]: "))
+model_num = int(input("Enter the Model Number [0-AmdahlSum , 1-AmdahlMax, 2-PowerSum , 3-PowerMax, 4-CommunicationSum , 5-CommunicationMax]: "))
 if model_num == 0:
-    model_name = "Roofline"
+    model_name = "AmdahlSum"
 elif model_num == 1:
-    model_name = 'Amdahl'
+    model_name = 'AmdahlMax'
 elif model_num == 2:
-    model_name = 'Communication'
+    model_name = 'PowerSum'
 elif model_num == 3:
-    model_name = 'General'
+    model_name = 'PowerMax'
+elif model_num == 4:
+    model_name = 'CommunicationSum'
+elif model_num == 5:
+    model_name = 'CommunicationMax'
+else:
+    raise ValueError("Invalid model number")
 
 
-
-if version == 0:
-    if model_num == 0:  
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 1:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 2:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 3:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-
-elif version == 1:
-    if model_num == 0:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 1:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 2:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-    elif model_num == 3:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
-
+# Same parameter ranges as before, now defined for all six models.
+# P1 is mu; P2 is beta (MAST), alpha (MTSA), or gamma (MTPA).
+if version in (0, 1):
+    P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
+    P2_MIN, P2_MAX, P2_STEP = 1.0, 5.0, 0.2
 elif version == 2:
-    if model_num == 0:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 0.0, 1.0, 0.05
-    elif model_num == 1:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 0.0, 1.0, 0.05
-    elif model_num == 2:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 0.0, 1.0, 0.05
-    elif model_num == 3:
-        P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
-        P2_MIN, P2_MAX, P2_STEP = 0.0, 1.0, 0.05
+    P1_MIN, P1_MAX, P1_STEP = 0.1, 0.90, 0.02
+    P2_MIN, P2_MAX, P2_STEP = 0.0, 1.0, 0.05
+# For version 3 (FAIR), the present Task class ignores mu, so no BO is run.
 
 result_directory = folder + model_name
 os.makedirs(result_directory, exist_ok=True)
@@ -138,7 +112,7 @@ KAPPA = 1.0
 SAT_PATIENCE = 10
 MIN_IMPROVEMENT = 0.0 # Minimum improvement to reset saturation counter (set to 0 for any improvement)
 
-main_folder = priority_name #change
+main_folder = f"multiresource/{priority_name}" #change
           #change
 
 # Full path
@@ -146,18 +120,9 @@ OUTPUT_DIR = os.path.join(main_folder, sub_folder)
 
 
 
-if model_num == 1:
-    TERMINAL_LOG_TXT = os.path.join(OUTPUT_DIR, "TERMINAL_LOG_Amdahl_TXT.txt")
-    COMBO_RESULTS_CSV = os.path.join(OUTPUT_DIR, "combo_results_Amdahl.csv")
-elif model_num == 2:
-    TERMINAL_LOG_TXT = os.path.join(OUTPUT_DIR, "TERMINAL_LOG_Communication_TXT.txt")
-    COMBO_RESULTS_CSV = os.path.join(OUTPUT_DIR, "combo_results_comm.csv")
-elif model_num == 0:
-    TERMINAL_LOG_TXT = os.path.join(OUTPUT_DIR, "TERMINAL_LOG_Roofline_TXT.txt")
-    COMBO_RESULTS_CSV = os.path.join(OUTPUT_DIR, "combo_results_Roofline.csv")
-else:
-    TERMINAL_LOG_TXT = os.path.join(OUTPUT_DIR, "TERMINAL_LOG_General_TXT.txt")
-    COMBO_RESULTS_CSV = os.path.join(OUTPUT_DIR, "combo_results_General.csv")
+# Keep each model's output/log files separate.
+TERMINAL_LOG_TXT = os.path.join(OUTPUT_DIR, f"TERMINAL_LOG_{model_name}.txt")
+COMBO_RESULTS_CSV = os.path.join(OUTPUT_DIR, f"combo_results_{model_name}.csv")
 
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -262,9 +227,12 @@ def evaluate_one_combination_return_value(p1: float, p2: float) -> float:
     elif version == 1:
         file_name = f"mu_{mu:.2f}_alpha_{par:.2f}.csv"
         alpha, beta, gamma = [par, None, None]
-    else:
+    elif version == 2:
         file_name = f"mu_{mu:.2f}_gamma_{par:.2f}.csv"
         alpha, beta, gamma = [None, None, par]
+    else:  # FAIR, as currently implemented, is independent of mu
+        file_name = "fair.csv"
+        alpha, beta, gamma = [None, None, None]
 
     combo_max_value = float("-inf")
 
@@ -295,6 +263,20 @@ def main():
     sys.stdout = tee
 
     try:
+        if version == 3:
+            # FAIR has no tuned beta/alpha/gamma. In your current Task.py it also
+            # does not apply a mu cap, so changing mu would not change results.
+            mu = 0.5  # Passed for signature compatibility; ignored by FAIR.
+            val = evaluate_one_combination_return_value(mu, None)
+            fields = ["eval_id", "P1", "P2", "value", "global_best_value", "global_best_P1", "global_best_P2"]
+            write_csv_header_if_missing(COMBO_RESULTS_CSV, fields)
+            append_csv_row(COMBO_RESULTS_CSV, fields, {"eval_id": 1, "P1": None, "P2": None, "value": val,
+                                                        "global_best_value": val, "global_best_P1": None, "global_best_P2": None})
+            print(f"FAIR complete | priority={priority_name} | model={model_name} | max makespan ratio={val}")
+            print(f"Saved CSV: {COMBO_RESULTS_CSV}")
+            print(f"Saved terminal log: {TERMINAL_LOG_TXT}")
+            return
+
         p1_values = frange_inclusive(P1_MIN, P1_MAX, P1_STEP)
         p2_values = frange_inclusive(P2_MIN, P2_MAX, P2_STEP)
 

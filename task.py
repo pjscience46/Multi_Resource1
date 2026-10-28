@@ -1,4 +1,3 @@
-
 from math import *
 from model import Model
 from enum import Enum
@@ -13,23 +12,16 @@ class Status(Enum):
 
 class Task:
 
-    def __init__(self, w, p, d, c, status: Status = Status.BLOCKED, allocation=None, needed_time=None, starting_time=None, ):
-        """
-        :param w: The total parallelizable work of the task
-        :param p: The maximum degree of parallelism of the task
-        :param d: The sequential work of the task
-        :param c: The communication overhead
-        :param status: Can take the values 0 (non available), 1 (available), 2 (in the queue or being processed),
-                       3 (processed).
-        :param allocation: If None, the algorithm "allocate_processor" has not been run yet, else it's the number
-                           of processor needed for the completion of the task.
-        :param needed_time: The time needed by the task to be processed ( it depends on the allocation)
-        :param starting_time: The time when the task start being processed.
-        """
+    def __init__(self, w, sigma, phi_1, phi_2, q_1, q_2,
+                 status: Status = Status.BLOCKED, allocation=None,
+                 needed_time=None, starting_time=None):
+        """Task parameters for a two-resource execution-time model."""
         self._w = w
-        self._p = p
-        self._d = d
-        self._c = c
+        self._sigma = sigma
+        self._phi_1 = phi_1
+        self._phi_2 = phi_2
+        self._q_1 = q_1
+        self._q_2 = q_2
         self._status: Status = status
         self._allocation = allocation
         self._needed_time = needed_time
@@ -41,14 +33,20 @@ class Task:
     def get_w(self):
         return self._w
 
-    def get_p(self):
-        return self._p
+    def get_sigma(self):
+        return self._sigma
 
-    def get_d(self):
-        return self._d
+    def get_phi_1(self):
+        return self._phi_1
 
-    def get_c(self):
-        return self._c
+    def get_phi_2(self):
+        return self._phi_2
+
+    def get_q_1(self):
+        return self._q_1
+
+    def get_q_2(self):
+        return self._q_2
 
     def get_status(self) -> Status:
         return self._status
@@ -65,27 +63,29 @@ class Task:
     def set_w(self, value):
         self._w = value
 
-    def set_p(self, value):
-        if value == 0:
-            raise ValueError("p must be different from 0")
-        self._p = value
+    def set_sigma(self, value):
+        self._sigma = value
 
-    def set_d(self, value):
-        self._d = value
+    def set_phi_1(self, value):
+        self._phi_1 = value
 
-    def set_c(self, value):
-        self._c = value
+    def set_phi_2(self, value):
+        self._phi_2 = value
+
+    def set_q_1(self, value):
+        self._q_1 = value
+
+    def set_q_2(self, value):
+        self._q_2 = value
 
     def set_status(self, value: Status):
         self._status = value
 
     def set_allocation(self, value):
-
-        if value < 1:
-
-            raise ValueError("The number of allocated processors must be superior to 1")
-
-        self._allocation = value
+        # The task now receives an allocation vector [p, m].
+        if len(value) != 2 or any(x < 1 for x in value):
+            raise ValueError("Each of the two resource allocations must be at least 1")
+        self._allocation = list(value)
 
     def set_needed_time(self, value):
         self._needed_time = value
@@ -101,127 +101,151 @@ class Task:
             return False
         if other.get_needed_time() is None:
             return True
-        return self.get_needed_time() + self.get_starting_time() < other.get_needed_time() + other.get_starting_time()
+        return (self.get_needed_time() + self.get_starting_time()
+                < other.get_needed_time() + other.get_starting_time())
 
     def get_execution_time(self, nb_processors, speedup_model: Model):
-        """
-        Return the execution time for a given task,speedup model ( Amdahl, Communication, General, Roofline ).
-        """
-        if self.get_p() == 0:
-            raise ValueError("p must be different from 0")
-       
-        if nb_processors < 1:
-            raise ValueError("The number of processors must be superior to 1")
-        return speedup_model.time(self, nb_processors) 
+        """Return the execution time for an allocation vector [p, m]."""
+        if len(nb_processors) != 2 or any(x < 1 for x in nb_processors):
+            raise ValueError("Each of the two resource allocations must be at least 1")
+        return speedup_model.time(self, nb_processors)
 
-    def get_area(self, number_of_processors, speedup_model: Model):
-        """Return the area of a task depending on the number of processor allocated and the speedup model"""
-        return self.get_execution_time(number_of_processors, speedup_model) * number_of_processors
+    def get_area(self, nb_processors, P, speedup_model: Model):
+        """Return average normalized area for allocation [p, m] and capacities P."""
+        execution_time = self.get_execution_time(nb_processors, speedup_model)
+        area_1 = nb_processors[0] * execution_time / P[0]
+        area_2 = nb_processors[1] * execution_time / P[1]
+        return (area_1 + area_2) / 2
 
     def get_p_max(self, P, speedup_model: Model):
-        """"Allocating more than p_max processors to the task will no longer decrease its execution time"""
-        return speedup_model.p_max(self, P)
- 
+        """With no task-specific maxima, use both system capacities."""
+        return list(P)
 
-    def allocate_processor_algo(self, P_num, mu, alpha,beta,gamma, speedup_model: Model,version):
-        
+    def allocate_processor_algo(self, P_num, d, mu, alpha, beta, gamma,
+                                speedup_model: Model, version):
 
-        # Step 1 : Initial Allocation
+        # Step 1: Initial Allocation
         w = self.get_w()
-        p = self.get_p()
-        d = self.get_d()
-        c = self.get_c()
-        #p_num - number of avilable processors
-        p_max = self.get_p_max(P_num, speedup_model)
-        t_min = self.get_minimum_execution_time(p_max, speedup_model)
-        a_min = self.get_minimum_area(1, speedup_model)
-        final_nb_processors = -1
-        if version == 0:
+        sigma = self.get_sigma()
+        phi_1 = self.get_phi_1()
+        phi_2 = self.get_phi_2()
+        q_1 = self.get_q_1()
+        q_2 = self.get_q_2()
+
+        if d != 2 or len(P_num) != 2:
+            raise ValueError("This Task class currently supports two resource types")
+
+        # Max capacity for each resource type
+        p_max = P_num[0]
+        m_max = P_num[1]
+
+        t_min = self.get_minimum_execution_time(P_num, speedup_model)
+        a_min = self.get_minimum_area(P_num, speedup_model)
+        final_nb_processors = None
+
+        if version == 0:  # MAST
             Beta_min = inf
-            for i in range(1, p_max + 1):   
-                AR = self.get_area(i, speedup_model) / a_min[0]  #ratio of area of task to minimum area
-                TR = self.get_execution_time(i, speedup_model) / t_min[0] #ratio of time taken by task to minimum time
-                if TR >=1 and TR <= beta:
-                    if AR < Beta_min:
-                        Beta_min = AR
-                        final_nb_processors = i 
+            for p in range(1, p_max + 1):
+                for m in range(1, m_max + 1):
+                    allocation = [p, m]
+                    AR = self.get_area(allocation, P_num, speedup_model) / a_min[0]
+                    TR = self.get_execution_time(allocation, speedup_model) / t_min[0]
+                    if TR >= 1 and TR <= beta:
+                        if AR < Beta_min:
+                            Beta_min = AR
+                            final_nb_processors = allocation
 
-            if final_nb_processors > ceil(mu * P_num):
-                self.set_allocation(ceil(mu * P_num))
-            else:
-                self.set_allocation(final_nb_processors) 
-
-        elif version == 1:
+        elif version == 1:  # MTSA
             Alpha_min = inf
-            for i in range(1, p_max + 1):
-                AR = self.get_area(i, speedup_model)/ a_min[0]
-                TR = self.get_execution_time(i, speedup_model) / t_min[0]
-                if AR >=1 and AR <= alpha:
-                    if TR < Alpha_min:
-                        Alpha_min = TR
-                        final_nb_processors = i 
+            for p in range(1, p_max + 1):
+                for m in range(1, m_max + 1):
+                    allocation = [p, m]
+                    AR = self.get_area(allocation, P_num, speedup_model) / a_min[0]
+                    TR = self.get_execution_time(allocation, speedup_model) / t_min[0]
+                    if AR >= 1 and AR <= alpha:
+                        if TR < Alpha_min:
+                            Alpha_min = TR
+                            final_nb_processors = allocation
 
-            if final_nb_processors > ceil(mu * P_num):
-                self.set_allocation(ceil(mu * P_num))
-            else:
-                self.set_allocation(final_nb_processors)  
+        elif version == 2:  # MTPA
+            min_value = inf
+            for p in range(1, p_max + 1):
+                for m in range(1, m_max + 1):
+                    allocation = [p, m]
+                    AR = self.get_area(allocation, P_num, speedup_model) / a_min[0]
+                    TR = self.get_execution_time(allocation, speedup_model) / t_min[0]
+                    total_value = (AR * gamma) + (TR * (1 - gamma))
+                    if total_value < min_value:
+                        min_value = total_value
+                        final_nb_processors = allocation
 
-        elif version == 2:
-            min_value = float('inf')
-            for i in range(1, p_max + 1):   
-                AR = self.get_area(i, speedup_model) / a_min[0]
-                TR = self.get_execution_time(i, speedup_model) / t_min[0]
-                total_value = ((AR )* gamma ) + ((TR )* (1 - gamma))
-                if total_value < min_value:
-                    min_value = total_value
-                    final_nb_processors = i 
+        elif version == 3:  # FAIR
+            R_min = inf
+            for p in range(1, p_max + 1):
+                for m in range(1, m_max + 1):
+                    allocation = [p, m]
+                    AR = self.get_area(allocation, P_num, speedup_model) / a_min[0]
+                    TR = self.get_execution_time(allocation, speedup_model) / t_min[0]
+                    R_j = max(TR, AR)
+                    if R_j < R_min:
+                        R_min = R_j
+                        final_nb_processors = allocation
 
-            if final_nb_processors > ceil(mu * P_num):
-                self.set_allocation(ceil(mu * P_num))
-            else:
-                self.set_allocation(final_nb_processors) 
+        else:
+            raise ValueError("version must be 0 (MAST), 1 (MTSA), 2 (MTPA), or 3 (FAIR)")
 
-        elif version == 3:
-            R_min = inf   
-            final_nb_processors = 1
-            for i in range(1, p_max + 1):
-                AR = self.get_area(i, speedup_model) / a_min[0]
-                TR = self.get_execution_time(i, speedup_model) / t_min[0]
-                R_j = max(TR, AR)
+        if final_nb_processors is None:
+            raise ValueError("No feasible allocation found")
 
-                if R_j < R_min:
-                    R_min = R_j
-                    final_nb_processors = i    #not storing global r as we are not using it to calculate adjusted allocation
-            self.set_allocation(final_nb_processors)
+        # Preserve original behavior: cap versions 0, 1, 2; FAIR is uncapped.
+        if version in (0, 1, 2):
+            final_nb_processors = [
+                min(final_nb_processors[0], ceil(mu * p_max)),
+                min(final_nb_processors[1], ceil(mu * m_max))
+            ]
 
-            
+        self.set_allocation(final_nb_processors)
 
     def get_minimum_execution_time(self, P, speedup_model: Model):
-        """Return the minimum execution time"""
+        """Return [minimum time, allocation] over all [p, m] combinations."""
         t_min = inf
-        p_min = -1
-        for p in range(1, self.get_p_max(P, speedup_model) + 1):
-            execution_time = self.get_execution_time(p, speedup_model)
-            if execution_time < t_min:
-                t_min = execution_time
-                p_min = p
+        p_min = None
+
+        p_max = P[0]
+        m_max = P[1]
+
+        for p in range(1, p_max + 1):
+            for m in range(1, m_max + 1):
+                allocation = [p, m]
+                execution_time = self.get_execution_time(allocation, speedup_model)
+                if execution_time < t_min:
+                    t_min = execution_time
+                    p_min = allocation
+
         return [t_min, p_min]
 
     def get_minimum_area(self, P, speedup_model: Model):
-        """Return the minimum area ( Processors needed x execution times )"""
-        area_min = 100000000000
-        p_min = -1
-        for p in range(1, self.get_p_max(P, speedup_model) + 1):
-            execution_time = self.get_execution_time(p, speedup_model)
-            if execution_time * p < area_min:
-                area_min = execution_time * p
-                p_min = p
+        """Return [minimum average normalized area, allocation]."""
+        area_min = inf
+        p_min = None
+
+        p_max = P[0]
+        m_max = P[1]
+
+        for p in range(1, p_max + 1):
+            for m in range(1, m_max + 1):
+                allocation = [p, m]
+                average_area = self.get_area(allocation, P, speedup_model)
+                if average_area < area_min:
+                    area_min = average_area
+                    p_min = allocation
+
         return [area_min, p_min]
 
-    def allocate_processor_Min_time(self, P, mu, speedup_model: Model):
-        """Allocate the processor to minimize the execution time of the task"""
+    def allocate_processor_Min_time(self, P, d, mu, speedup_model: Model):
+        """Allocate the resource vector minimizing execution time."""
         self.set_allocation(self.get_minimum_execution_time(P, speedup_model)[1])
 
-    def allocate_processor_Min_area(self, P, mu, speedup_model: Model):
-        """Allocate the processor to minimize the area of the task"""
+    def allocate_processor_Min_area(self, P, d, mu, speedup_model: Model):
+        """Allocate the resource vector minimizing average area."""
         self.set_allocation(self.get_minimum_area(P, speedup_model)[1])
